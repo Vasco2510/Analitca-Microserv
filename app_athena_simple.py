@@ -78,6 +78,30 @@ def ejecutar_consulta_athena(query):
 def health():
     return jsonify({"status": "active", "service": "Athena Simple"})
 
+@app.route('/api/productos-top')
+def productos_top():
+    consulta = """
+    SELECT nombre, precio 
+    FROM productos 
+    ORDER BY precio DESC 
+    LIMIT 10
+    """
+    resultados, error = ejecutar_consulta_athena(consulta)
+    # ... procesar y retornar
+
+@app.route('/api/stock-bajo')
+def stock_bajo():
+    consulta = """
+    SELECT p.nombre, i.stock_disponible, a.nombre as almacen
+    FROM productos p
+    JOIN inventarios i ON p.id_producto = i.id_producto  
+    JOIN almacenes a ON i.id_almacen = a.id_almacen
+    WHERE i.stock_disponible < 100
+    """
+    resultados, error = ejecutar_consulta_athena(consulta)
+    # ... procesar y retornar
+
+
 @app.route('/api/consulta-simple')
 def consulta_simple():
     """ENDPOINT PRINCIPAL - Solo una consulta específica"""
