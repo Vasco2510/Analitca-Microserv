@@ -1,0 +1,220 @@
+# app.py
+
+import boto3
+from flask import Flask, jsonify, request
+import time
+
+# ============================================
+# Configuración de AWS
+# ============================================
+# Reemplaza 'tu-bucket-resultados-athena' con el nombre que le des a tu bucket.
+REGION = 'us-east-1	'
+S3_OUTPUT_BUCKET = 's3://analytics/results/' 
+# Ojo: la ruta termina con 'results/' para organizar mejor tus resultados
+DATABASE_NAME = 'ecommerce_analytics_db' # El nombre de la base de datos de Glue
+ATHENA_CLIENT = boto3.client('athena', region_name=REGION)
+
+app = Flask(__name__)
+
+
+
+
+def run_athena_query(query):
+    try:
+        # 1. Ejecutar la consulta en Athena
+        response = ATHENA_CLIENT.start_query_execution(
+            QueryString=query,
+            QueryExecutionContext={
+                'Database': DATABASE_NAME
+            },
+            ResultConfiguration={
+                'OutputLocation': S3_OUTPUT_BUCKET
+            }
+        )
+        query_execution_id = response['QueryExecutionId']
+
+        # 2. Esperar a que la consulta termine (polling)
+        while True:
+            status = ATHENA_CLIENT.get_query_execution(QueryExecutionId=query_execution_id)['QueryExecution']['Status']['State']
+            if status in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
+                break
+            time.sleep(1) # Espera 1 segundo antes de volver a chequear
+
+        if status == 'SUCCEEDED':
+            # 3. Obtener y procesar los resultados
+            result = ATHENA_CLIENT.get_query_results(QueryExecutionId=query_execution_id)
+            
+            # Procesar las filas de resultados (la primera fila es la cabecera)
+            columns = [col['VarCharValue'] for col in result['ResultSet']['Rows'][0]['Data']]
+            data = []
+            for row in result['ResultSet']['Rows'][1:]:
+                # Crea un diccionario para cada fila
+                item = {columns[i]: row['Data'][i]['VarCharValue'] for i in range(len(columns))}
+                data.append(item)
+            
+            return data
+        else:
+            error_message = ATHENA_CLIENT.get_query_execution(QueryExecutionId=query_execution_id)['QueryExecution']['Status'].get('StateChangeReason', 'Error desconocido')
+            return {"error": f"Consulta fallida: {error_message}"}, 500
+
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+# ============================================
+# ENDPOINT DE API REST
+# ============================================
+@app.route('/api/analytics/top-productos', methods=['GET'])
+def get_top_products():
+    """ Consulta a Athena: Top 5 Productos con Mayor Valor de Inventario (Consulta 1). """
+    ## confirmado que si funciona
+    query = f"""
+    SELECT
+        t2.nombre AS nombre_producto,
+        SUM(t1.stock_disponible * t2.precio) AS valor_inventario_total
+    FROM
+        inventarios t1
+    INNER JOIN
+        productos t2 ON t1.id_producto = t2.id_producto
+    GROUP BY
+        t2.nombre
+    ORDER BY
+        valor_inventario_total DESC
+    LIMIT 5
+    """
+    results, status_code = run_athena_query(query)
+    # ... (Devolver respuesta JSON como en el código original) ...
+    if status_code != 500:
+        return jsonify({"status": "success", "data": results, "metadata": "Top 5 Productos por Valor de Inventario"})
+    else:
+        return jsonify(results), status_code
+
+@app.route('/api/analytics/almacen-eficiencia', methods=['GET'])
+def get_warehouse_efficiency():
+    """ Consulta a Athena: Stock Promedio por Tipo de Almacén (Consulta 2). """
+    query = f"""
+    SELECT
+        t2.tipo AS tipo_almacen,
+        COUNT(DISTINCT t1.id_producto) AS productos_diferentes_almacenados,
+        AVG(t1.stock_disponible) AS stock_promedio_por_producto
+    FROM
+        inventarios t1
+    INNER JOIN
+        almacenes t2 ON t1.id_almacen = t2.id_almacen
+    GROUP BY
+        t2.tipo
+    ORDER BY
+        productos_diferentes_almacenados DESC
+    """
+    results, status_code = run_athena_query(query)
+    if status_code != 500:
+        return jsonify({"status": "success", "data": results, "metadata": "Eficiencia de Inventario por Tipo de Almacén"})
+    else:
+        return jsonify(results), status_code
+
+
+@app.route('/api/analytics/bajo-riesgo', methods=['GET'])
+def get_low_risk_inventory():
+    """ Consulta a Athena: Productos con Bajo Stock y Alto Stock Reservado (Consulta 3). """
+    # Esta consulta usa la vista 'inventario_detalle'
+    query = f"""
+    SELECT
+        nombre_producto,
+        stock_disponible,
+        stock_reservado,
+        nombre_almacen,
+        ubicacion
+    FROM
+        inventario_detalle
+    WHERE
+        stock_disponible < 100 AND stock_reservado > 50
+    ORDER BY
+        stock_reservado DESC
+    """
+    results, status_code = run_athena_query(query)
+    if status_code != 500:
+        return jsonify({"status": "success", "data": results, "metadata": "Inventario de Alto Riesgo de Quiebre de Stock"})
+    else:
+        return jsonify(results), status_code
+
+
+@app.route('/api/analytics/vistas/crear', methods=['POST'])
+def create_analytics_views():
+    """ Endpoint para crear o reemplazar las vistas de Athena (Mínimo 2 vistas). """
+    
+    # Vista 1: Inventario Detallado (Unión de 3 Tablas)
+    view_query_1 = """
+    CREATE OR REPLACE VIEW inventario_detalle AS
+    SELECT
+        t1.id_inventario, t1.stock_disponible, t1.stock_reservado, t1.ultima_actualizacion,
+        t2.nombre AS nombre_almacen, t2.ubicacion,
+        t3.nombre AS nombre_producto, t3.precio, t3.sku
+    FROM
+        inventarios t1
+    INNER JOIN
+        almacenes t2 ON t1.id_almacen = t2.id_almacen
+    INNER JOIN
+        productos t3 ON t1.id_producto = t3.id_producto;
+    """
+    
+    # Vista 2: Inventario Bajo Riesgo (Para Monitoreo)
+    view_query_2 = """
+    CREATE OR REPLACE VIEW inventario_bajo_riesgo AS
+    SELECT
+        nombre_producto, nombre_almacen, stock_disponible, stock_reservado, ultima_actualizacion
+    FROM
+        inventario_detalle
+    WHERE
+        stock_disponible < 150 OR stock_reservado > 100
+    ORDER BY
+        stock_disponible ASC;
+    """
+
+    # Ejecutar ambas consultas (se espera que 'inventario_detalle' exista para la segunda vista)
+    run_athena_query(view_query_1)
+    run_athena_query(view_query_2)
+    
+    return jsonify({
+        "status": "success", 
+        "message": "Vistas 'inventario_detalle' y 'inventario_bajo_riesgo' creadas/actualizadas en Athena."
+    }), 200
+## de aqui en adelante eran ejemplos
+
+
+
+# @app.route('/api/analytics/top-productos', methods=['GET'])
+# def get_top_products():
+#     """
+#     Consulta a Athena para obtener los 10 productos más vendidos
+#     """
+# ## ejemplo de consulta
+#     query = f"""
+#     SELECT
+#         T2.product_name,
+#         SUM(CAST(T1.quantity AS INTEGER)) AS total_sold
+#     FROM
+#         order_items_table AS T1,
+#         products_table AS T2
+#     WHERE
+#         T1.product_id = T2.product_id
+#     GROUP BY
+#         T2.product_name
+#     ORDER BY
+#         total_sold DESC
+#     LIMIT 10
+#     """
+    
+#     results, status_code = run_athena_query(query)
+
+#     if status_code != 500:
+#         return jsonify({
+#             "status": "success",
+#             "data": results,
+#             "metadata": "10 productos más vendidos (datos de S3/Athena)"
+#         })
+#     else:
+#         # En caso de error, devuelve el error y el código HTTP 500
+#         return jsonify(results), status_code
+
+if __name__ == '__main__':
+    # Flask corriendo en el puerto 5000 (el puerto que expondremos en Docker)
+    app.run(host='0.0.0.0', port=5000)
