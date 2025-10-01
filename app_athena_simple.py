@@ -99,8 +99,25 @@ def stock_bajo():
     WHERE i.stock_disponible < 500
     """
     resultados, error = ejecutar_consulta_athena(consulta)
-    # ... procesar y retornar
 
+
+@app.route('/api/topproductosmayorinventario')
+def topmayorinventario():
+    consulta="""
+    SELECT
+        t2.nombre AS nombre_producto,
+        SUM(t1.stock_disponible * t2.precio) AS valor_inventario_total
+    FROM
+        inventarios t1
+    INNER JOIN
+        productos t2 ON t1.id_producto = t2.id_producto
+    GROUP BY
+        t2.nombre
+    ORDER BY
+        valor_inventario_total DESC
+    LIMIT 5"""
+    resultados, error = ejecutar_consulta_athena(consulta)
+    
 
 @app.route('/api/consulta-simple')
 def consulta_simple():
@@ -138,9 +155,7 @@ def consulta_simple():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("🎯 MICROSERVICIO ATHENA - VERSIÓN SIMPLIFICADA")
-    print("📍 Endpoints:")
-    print("   GET /health")
-    print("   GET /api/consulta-simple")
+    print("🎯 MICROSERVICIO ATHENA - VERSIÓN SIMPLIFICADA corriendo en 5000")
+
     print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=True)
