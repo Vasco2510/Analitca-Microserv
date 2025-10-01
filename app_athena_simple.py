@@ -96,7 +96,7 @@ def stock_bajo():
     FROM productos p
     JOIN inventarios i ON p.id_producto = i.id_producto  
     JOIN almacenes a ON i.id_almacen = a.id_almacen
-    WHERE i.stock_disponible < 100
+    WHERE i.stock_disponible < 500
     """
     resultados, error = ejecutar_consulta_athena(consulta)
     # ... procesar y retornar
