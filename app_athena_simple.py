@@ -87,20 +87,42 @@ def productos_top():
     LIMIT 10
     """
     resultados, error = ejecutar_consulta_athena(consulta)
-    # ... procesar y retornar
+    
+    if error:
+        return jsonify({"status": "error", "message": f"Error: {error}"}), 500
+    else:
+        return jsonify({
+            "status": "success", 
+            "data": resultados,
+            "total": len(resultados)
+        })
 
-@app.route('/api/stock-bajo')
-def stock_bajo():
+@app.route('/api/stock-disponible-almacen')
+def stock_por_almacen():
     consulta = """
-    SELECT p.nombre, i.stock_disponible, a.nombre as almacen
-    FROM productos p
-    JOIN inventarios i ON p.id_producto = i.id_producto  
-    JOIN almacenes a ON i.id_almacen = a.id_almacen
-    WHERE i.stock_disponible < 500
+    
+    SELECT 
+    a.id_almacen,
+    a.nombre AS nombre_almacen,
+    SUM(i.stock_disponible) AS total_stock_disponible
+    FROM inventarios i
+    JOIN almacenes a
+        ON i.id_almacen = a.id_almacen
+    GROUP BY a.id_almacen, a.nombre
+    ORDER BY total_stock_disponible DESC;
     """
     resultados, error = ejecutar_consulta_athena(consulta)
-
-
+    
+    if error:
+        return jsonify({"status": "error", "message": f"Error: {error}"}), 500
+    else:
+        return jsonify({
+            "status": "success", 
+            "data": resultados,
+            "total": len(resultados)
+        })
+        
+        
 @app.route('/api/topproductosmayorinventario')
 def topmayorinventario():
     consulta="""
@@ -116,8 +138,23 @@ def topmayorinventario():
     ORDER BY
         valor_inventario_total DESC
     LIMIT 5"""
+    
     resultados, error = ejecutar_consulta_athena(consulta)
     
+    if error:
+        return jsonify({
+            "status": "error",
+            "message": f"Error en Athena: {error}",
+            "consulta_usada": consulta
+        }), 500
+    else:
+        return jsonify({
+            "status": "success",
+            "message": "Consulta ejecutada correctamente",
+            "total_resultados": len(resultados),
+            "data": resultados,
+            "consulta_usada": consulta
+        })
 
 @app.route('/api/consulta-simple')
 def consulta_simple():
