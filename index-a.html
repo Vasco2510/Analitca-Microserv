@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard de Analítica AWS Athena</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Fuente Inter para una apariencia moderna */
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f7f9fb; /* Fondo claro */
+      }
+      .code-block {
+        background-color: #1e293b; /* Gris oscuro para código */
+        color: #10b981; /* Verde esmeralda para el texto de código */
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        max-height: 200px;
+        font-family: monospace;
+        white-space: pre-wrap;
+      }
+      .data-table th {
+        background-color: #3b82f6; /* Azul primario */
+        color: white;
+        padding: 10px 15px;
+        text-align: left;
+        border-bottom: 2px solid #2563eb;
+      }
+      .data-table td {
+        padding: 8px 15px;
+        border-bottom: 1px solid #e5e7eb;
+        font-size: 0.9rem;
+      }
+      .data-table tr:nth-child(even) {
+        background-color: #eff6ff; /* Rayado suave */
+      }
+    </style>
+  </head>
+  <body class="p-6 md:p-10">
+    <div class="max-w-6xl mx-auto">
+      <!-- Encabezado -->
+      <header class="mb-8 p-6 bg-white shadow-lg rounded-xl">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">
+          📊 Dashboard de Analítica de Inventario
+        </h1>
+        <p class="text-gray-500">
+          Consulta en tiempo real al Microservicio de Analítica (Flask/Athena).
+          Host:
+          <span id="api-url-display" class="font-medium text-blue-600"></span>
+        </p>
+      </header>
+
+      <!-- Controles de la Consulta -->
+      <section class="mb-8 p-6 bg-white shadow-lg rounded-xl">
+        <h2 class="text-xl font-semibold text-gray-700 mb-4">
+          Selección de Consulta
+        </h2>
+
+        <div class="flex flex-col md:flex-row gap-4 items-end">
+          <div class="flex-grow w-full">
+            <label
+              for="endpoint-selector"
+              class="block text-sm font-medium text-gray-700 mb-1"
+              >Endpoint de Análisis:</label
+            >
+            <select
+              id="endpoint-selector"
+              class="w-full border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 p-2"
+            >
+              <option value="">Seleccione una consulta...</option>
+              <option value="/api/productos-top">
+                1. Productos Top (por precio)
+              </option>
+              <option value="/api/stock-disponible-almacen">
+                2. Stock Total Disponible por Almacén
+              </option>
+              <option value="/api/topproductosmayorinventario">
+                3. Top 5 Productos por Valor de Inventario
+              </option>
+              <option value="/api/consulta-simple">
+                4. Listado Detallado Simple (Limit 5)
+              </option>
+            </select>
+          </div>
+          <button
+            onclick="ejecutarConsulta()"
+            class="w-full md:w-auto px-6 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-md hover:bg-blue-700 transition duration-150 transform hover:scale-105"
+          >
+            Ejecutar Consulta
+          </button>
+        </div>
+
+        <!-- Mensajes de estado -->
+        <div
+          id="status-message"
+          class="mt-4 p-3 rounded-lg text-sm hidden"
+          role="alert"
+        ></div>
+      </section>
+
+      <!-- SQL y Resultados -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Bloque de Consulta SQL -->
+        <div class="bg-white p-6 shadow-lg rounded-xl">
+          <h2
+            class="text-xl font-semibold text-gray-700 mb-4 flex items-center"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-6 w-6 mr-2 text-gray-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+              />
+            </svg>
+            Consulta SQL
+          </h2>
+          <div class="code-block">
+            <pre id="sql-query-display">
+-- Seleccione un endpoint para visualizar la consulta SQL subyacente.</pre
+            >
+          </div>
+        </div>
+
+        <!-- Bloque de Metadata de la Respuesta -->
+        <div class="bg-white p-6 shadow-lg rounded-xl">
+          <h2
+            class="text-xl font-semibold text-gray-700 mb-4 flex items-center"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-6 w-6 mr-2 text-gray-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Metadata de la Respuesta
+          </h2>
+          <div class="code-block h-48 lg:h-40">
+            <pre id="metadata-display">
+{ "status": "pendiente", "total": 0 }</pre
+            >
+          </div>
+        </div>
+      </div>
+
+      <!-- Bloque de Resultados -->
+      <section class="mt-8 p-6 bg-white shadow-lg rounded-xl">
+        <h2 class="text-xl font-semibold text-gray-700 mb-4 flex items-center">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-6 w-6 mr-2 text-gray-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6h16M4 10h16M4 14h16M4 18h16"
+            />
+          </svg>
+          Resultados de la Consulta
+        </h2>
+        <div id="results-container" class="overflow-x-auto">
+          <table
+            id="results-table"
+            class="data-table min-w-full divide-y divide-gray-200"
+          >
+            <thead>
+              <!-- Las cabeceras se insertan dinámicamente -->
+            </thead>
+            <tbody>
+              <!-- Los datos se insertan dinámicamente -->
+            </tbody>
+          </table>
+          <div
+            id="no-data-message"
+            class="py-6 text-center text-gray-500 hidden"
+          >
+            No se encontraron resultados o la consulta no ha sido ejecutada.
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      // La URL base del microservicio de Analítica (Flask)
+      // Por defecto, se usa el puerto 5000 que es el que usa Flask en tu app.py
+      const API_BASE_URL =
+        "http://LoadBalancerProd-1659261513.us-east-1.elb.amazonaws.com";
+
+      document.getElementById("api-url-display").textContent = API_BASE_URL;
+
+      /**
+       * Muestra un mensaje de estado (éxito o error).
+       * @param {string} message - Mensaje a mostrar.
+       * @param {boolean} isError - Si es true, muestra color de error.
+       */
+      function displayStatus(message, isError = false) {
+        const statusDiv = document.getElementById("status-message");
+        statusDiv.textContent = message;
+        statusDiv.classList.remove(
+          "hidden",
+          "bg-red-100",
+          "text-red-700",
+          "bg-green-100",
+          "text-green-700"
+        );
+
+        if (isError) {
+          statusDiv.classList.add(
+            "bg-red-100",
+            "text-red-700",
+            "border",
+            "border-red-400"
+          );
+        } else {
+          statusDiv.classList.add(
+            "bg-green-100",
+            "text-green-700",
+            "border",
+            "border-green-400"
+          );
+        }
+      }
+
+      /**
+       * Ejecuta la consulta seleccionada en el microservicio.
+       */
+      async function ejecutarConsulta() {
+        const endpoint = document.getElementById("endpoint-selector").value;
+
+        if (!endpoint) {
+          displayStatus(
+            "⚠️ Por favor, seleccione un endpoint de la lista.",
+            true
+          );
+          return;
+        }
+
+        // Limpiar resultados y metadata
+        document.getElementById("sql-query-display").textContent =
+          "Cargando...";
+        document.getElementById("metadata-display").textContent =
+          '{ "status": "ejecutando" }';
+        document
+          .getElementById("results-table")
+          .getElementsByTagName("thead")[0].innerHTML = "";
+        document
+          .getElementById("results-table")
+          .getElementsByTagName("tbody")[0].innerHTML = "";
+        document.getElementById("no-data-message").classList.add("hidden");
+        displayStatus(`⏳ Ejecutando consulta en ${endpoint}...`, false);
+
+        const fullUrl = `${API_BASE_URL}${endpoint}`;
+
+        try {
+          const response = await fetch(fullUrl);
+          const data = await response.json();
+
+          // 1. Mostrar SQL y Metadata
+          const status = data.status || "desconocido";
+          const total = data.total_resultados || data.data.length || 0;
+
+          document.getElementById("sql-query-display").textContent =
+            data.consulta_usada || "SQL no disponible en la respuesta.";
+
+          document.getElementById("metadata-display").textContent =
+            JSON.stringify(
+              {
+                status: status,
+                message:
+                  data.message ||
+                  (status === "success"
+                    ? "Consulta exitosa"
+                    : "Verifique el error"),
+                total_resultados: total,
+              },
+              null,
+              2
+            );
+
+          if (response.ok && status === "success") {
+            displayStatus(
+              `✅ Consulta exitosa! Se obtuvieron ${total} filas.`,
+              false
+            );
+            renderizarTabla(data.data);
+          } else {
+            displayStatus(
+              `❌ Error del servicio: ${data.message || data.status}`,
+              true
+            );
+            renderizarTabla([]);
+          }
+        } catch (error) {
+          console.error("Error al conectar con el microservicio:", error);
+          displayStatus(
+            `❌ Error de conexión: Asegúrese de que el microservicio esté corriendo en ${API_BASE_URL}.`,
+            true
+          );
+          document.getElementById(
+            "metadata-display"
+          ).textContent = `{ "error": "Fallo de conexión", "detalle": "${error.message}" }`;
+          renderizarTabla([]);
+        }
+      }
+
+      /**
+       * Renderiza los datos en una tabla HTML.
+       * @param {Array<Object>} data - Los resultados de la consulta.
+       */
+      function renderizarTabla(data) {
+        const tbody = document
+          .getElementById("results-table")
+          .getElementsByTagName("tbody")[0];
+        const thead = document
+          .getElementById("results-table")
+          .getElementsByTagName("thead")[0];
+        tbody.innerHTML = "";
+        thead.innerHTML = "";
+        document.getElementById("no-data-message").classList.add("hidden");
+
+        if (!data || data.length === 0) {
+          document.getElementById("no-data-message").classList.remove("hidden");
+          return;
+        }
+
+        // Crear cabeceras
+        const columns = Object.keys(data[0]);
+        let headerRow = "<tr>";
+        columns.forEach((col) => {
+          // Formatear el nombre de la columna (ej. nombre_almacen -> Nombre Almacén)
+          const formattedCol = col
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (l) => l.toUpperCase());
+          headerRow += `<th class="px-6 py-3">${formattedCol}</th>`;
+        });
+        headerRow += "</tr>";
+        thead.innerHTML = headerRow;
+
+        // Crear filas de datos
+        let bodyContent = "";
+        data.forEach((item) => {
+          bodyContent += "<tr>";
+          columns.forEach((col) => {
+            let value = item[col] || "";
+            // Intento de formato de moneda (simplificado)
+            if (
+              col.toLowerCase().includes("precio") ||
+              col.toLowerCase().includes("valor")
+            ) {
+              value = `$${parseFloat(value).toFixed(2)}`;
+            } else if (!isNaN(value) && value !== "") {
+              value = parseFloat(value).toLocaleString();
+            }
+            bodyContent += `<td class="py-2">${value}</td>`;
+          });
+          bodyContent += "</tr>";
+        });
+        tbody.innerHTML = bodyContent;
+      }
+
+      // Ejecutar la función de salud para verificar la conexión inicial
+      window.onload = () => {
+        // Limpiar la tabla inicialmente
+        renderizarTabla([]);
+      };
+    </script>
+  </body>
+</html>
